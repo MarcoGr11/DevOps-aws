@@ -8,6 +8,10 @@
 описана в [LAB9.md](LAB9.md). Вона не змінює нічого з лаби 8: окремий
 `docker-compose.lab9.yml`, а `lambda/handler.py` перевикористовується як є.
 
+**Лаба 10** (моніторинг: метрики запитів у CloudWatch, alarms, керована деградація)
+описана в [LAB10.md](LAB10.md). Вона накладає `docker-compose.lab10.yml` на стек лаби 9;
+без цього файлу лаби 8 і 9 працюють як раніше.
+
 ## Архітектура
 
 ```mermaid
@@ -157,18 +161,24 @@ make smoke       # end-to-end через curl проти LocalStack, ненул�
 lambda/handler.py         код Lambda (лише boto3 + stdlib)
 tests/test_handler.py     юніт-тести з FakeTable
 tests/test_server.py      юніт-тести HTTP-адаптера лаби 9
+tests/test_metrics.py     лаба 10: публікація метрик і /admin/chaos
+tests/test_stats.py       лаба 10: формули stats.py
 app/                      лаба 9: HTTP-адаптер (server.py), Dockerfile, init таблиці
 nginx/nginx.conf          лаба 9: балансувальник (upstream з 3 екземплярів)
 scripts/lab9/             лаба 9: load.sh, failover-demo.sh, compare.sh
 docker-compose.lab9.yml   лаба 9: localstack + init + app1..3 + nginx (+ app-single)
+docker-compose.lab10.yml  лаба 10: CloudWatch/SNS/SQS у LocalStack (:4567), метрики, chaos
+scripts/lab10/            лаба 10: loadgen, stats, alarms, alarm-watch, plot, experiment
 deploy.sh                 розгортання (ідемпотентне)
 destroy.sh                видалення ресурсів
 smoke-test.sh             e2e-перевірка через curl + jq
 docker-compose.yml        LocalStack 4.9.2
-Makefile                  up / deploy / smoke / test / destroy / down / venv / lab9-*
-reports/                  знімки екрана, чеклісти, PDF-звіти лаб 8 і 9 (build_report.py [8|9])
+Makefile                  up / deploy / smoke / test / destroy / down / venv / lab9-* / lab10-*
+reports/                  знімки екрана, чеклісти, журнал і графіки лаби 10,
+                          PDF-звіти лаб 8–10 (build_report.py [8|9|10])
 DEFENSE-LAB8.md           шпаргалка для захисту лаби 8
 LAB9.md, DEFENSE-LAB9.md  лаба 9: опис і шпаргалка
+LAB10.md, DEFENSE-LAB10.md лаба 10: опис і шпаргалка
 ```
 
 ## Що робить кожен рядок deploy.sh
