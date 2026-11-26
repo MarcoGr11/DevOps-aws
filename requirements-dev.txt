@@ -4,3 +4,4 @@ boto3
 awscli-local
 reportlab
 pillow
+matplotlib

@@ -1,0 +1,29 @@
+# Лаба 10: CloudWatch-метрики, alarms і керована деградація поверх стека лаби 9.
+# Файл накладається на docker-compose.lab9.yml (той самий проєкт devops-lab9):
+#   docker compose -f docker-compose.lab9.yml -f docker-compose.lab10.yml up -d --build --wait
+# Сам docker-compose.lab9.yml не змінено: без цього файлу лаба 9 працює як раніше.
+
+x-lab10-env: &lab10-env
+  CLOUDWATCH_ENABLED: "1"           # застосунок публікує метрики в CloudWatch (LocalStack)
+  METRICS_NAMESPACE: Bookings
+  ENABLE_CHAOS: "1"                 # /admin/chaos лише для лабораторного стека, не для продакшену
+
+services:
+  localstack:
+    environment:
+      # cloudwatch — метрики й alarms; sns + sqs — дії alarm (повідомлення в чергу)
+      - SERVICES=dynamodb,cloudwatch,sns,sqs
+    ports:
+      # 4567, бо 4566 на хості зайнятий LocalStack лаби 8; скрипти лаби 10 ходять сюди
+      - "127.0.0.1:4567:4566"
+
+  # прямий доступ до кожного екземпляра (минаючи nginx) — щоб вмикати chaos точково
+  app1:
+    environment: *lab10-env
+    ports: ["127.0.0.1:8101:8000"]
+  app2:
+    environment: *lab10-env
+    ports: ["127.0.0.1:8102:8000"]
+  app3:
+    environment: *lab10-env
+    ports: ["127.0.0.1:8103:8000"]

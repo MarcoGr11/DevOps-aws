@@ -6,4 +6,4 @@ extend-exclude = [".venv", "build"]
 select = ["E", "F", "W", "I", "B", "UP"]
 
 [lint.isort]
-known-first-party = ["handler", "server"]
+known-first-party = ["handler", "server", "stats"]
