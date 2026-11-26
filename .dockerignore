@@ -1,0 +1,5 @@
+*
+!app/requirements.txt
+!app/server.py
+!app/init_table.py
+!lambda/handler.py
