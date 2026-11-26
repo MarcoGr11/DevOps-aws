@@ -1,0 +1,10 @@
+.venv/
+.idea/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+build/
+.api-url
+.env
+main.py
+.DS_Store
