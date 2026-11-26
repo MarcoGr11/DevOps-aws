@@ -4,9 +4,9 @@
 (Python 3.12), доступний через API Gateway, з даними в DynamoDB. Усе працює локально
 в LocalStack (емулятор AWS у Docker) і розгортається одним скриптом `deploy.sh`.
 
-Репозиторій розширюваний: далі тут будуть лаба 9 (nginx + docker compose, 3 екземпляри,
-для цього вже є `GET /health` з полем `instance`) і лаба 10 (CloudWatch — сервіс уже
-ввімкнено в LocalStack).
+**Лаба 9** (балансування навантаження: той самий застосунок у 3 контейнерах за nginx)
+описана в [LAB9.md](LAB9.md). Вона не змінює нічого з лаби 8: окремий
+`docker-compose.lab9.yml`, а `lambda/handler.py` перевикористовується як є.
 
 ## Архітектура
 
@@ -156,13 +156,19 @@ make smoke       # end-to-end через curl проти LocalStack, ненул�
 ```
 lambda/handler.py         код Lambda (лише boto3 + stdlib)
 tests/test_handler.py     юніт-тести з FakeTable
+tests/test_server.py      юніт-тести HTTP-адаптера лаби 9
+app/                      лаба 9: HTTP-адаптер (server.py), Dockerfile, init таблиці
+nginx/nginx.conf          лаба 9: балансувальник (upstream з 3 екземплярів)
+scripts/lab9/             лаба 9: load.sh, failover-demo.sh, compare.sh
+docker-compose.lab9.yml   лаба 9: localstack + init + app1..3 + nginx (+ app-single)
 deploy.sh                 розгортання (ідемпотентне)
 destroy.sh                видалення ресурсів
 smoke-test.sh             e2e-перевірка через curl + jq
 docker-compose.yml        LocalStack 4.9.2
-Makefile                  up / deploy / smoke / test / destroy / down / venv
-reports/                  знімки екрана, чекліст, генератор PDF-звіту (build_report.py)
-DEFENSE-LAB8.md           шпаргалка для захисту
+Makefile                  up / deploy / smoke / test / destroy / down / venv / lab9-*
+reports/                  знімки екрана, чеклісти, генератор PDF-звітів (build_report.py)
+DEFENSE-LAB8.md           шпаргалка для захисту лаби 8
+LAB9.md, DEFENSE-LAB9.md  лаба 9: опис і шпаргалка
 ```
 
 ## Що робить кожен рядок deploy.sh
