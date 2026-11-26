@@ -649,12 +649,17 @@ SECTIONS10 = [
             (
                 "10-12",
                 "make test: pytest і ruff",
-                "35 тестів зелені: 16 лаби 8, 5 адаптера лаби 9, 9 метрик і chaos, 5 формул "
-                "stats.py. Перевіряється публікація метрик з фейковим клієнтом CloudWatch "
-                "(namespace, імена, одиниці, виміри, виключення /health і /admin, пакети, помилка "
-                "CloudWatch). ruff без зауважень.",
+                "35 тестів зелені: 16 лаби 8, 5 адаптера лаби 9, 9 метрик і chaos (фейковий "
+                "клієнт CloudWatch), 5 формул stats.py; ruff без зауважень.",
+                9,
             ),
-            ("10-13", "GitHub: коміти лаби 10", ""),
+            (
+                "10-13",
+                "GitHub: коміти лаби 10",
+                "чотири коміти лаби 10 від MarcoGr11 у main: метрики й chaos, скрипти, "
+                "документація, результати прогону.",
+                8.5,
+            ),
         ],
     ),
 ]
@@ -874,6 +879,14 @@ BEFORE = {
 
 def lab10():
     body, n = figures(SECTIONS10, width=11 * cm, max_h=19 * cm, head=[p("Хід виконання", H1)])
+    # 10-12 і 10-13 поруч, щоб звіт уклався в 12 сторінок
+    heading, pair = SECTIONS10[-1]
+    cells = [
+        figure(n - 1 + i, frame_files(c)[0], t, s, width=8 * cm)._content
+        for i, (c, t, s, _) in enumerate(pair)
+    ]
+    grid = Table([cells], colWidths=[8.5 * cm] * 2, style=[("VALIGN", (0, 0), (-1, -1), "TOP")])
+    body[-2:] = [KeepTogether([p(heading, H2), grid])]
     story = [
         p(UNIVERSITY, CENTER),
         p(INSTITUTE, CENTER),

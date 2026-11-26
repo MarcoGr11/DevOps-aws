@@ -33,7 +33,7 @@ PDF: `.venv/bin/python reports/build_report.py 10` → `reports/lab10-cloudwatch
 | `10-10` | сирий `describe-alarm-history` (видно неточний Timestamp LocalStack), розібрана історія 6 переходів з `queryDate`, ті самі 6 сповіщень у черзі SQS | 6 |
 | `10-11` | `stats.py --phases --instances`: 15 хвилин, по фазах (240/720/360/359/601 запитів, 65 помилок = 18,1% у фазі 3, 413,9 мс у фазі 4), реакція alarm +75 с / +195 с, 760/760/760 за InstanceId | 4, 5 |
 | `10-12` | `make test`: 35 passed (16 лаби 8, 5 адаптера, 9 метрик і chaos, 5 формул stats.py), ruff — All checks passed | 2, 3, 5 |
-| `10-13` | GitHub: коміти лаби 10 | — |
+| `10-13` | GitHub, сторінка комітів main: 4 коміти лаби 10 від MarcoGr11 (обрізано після них) | — |
 | `graphs/lab10-requests.png` | запити за хвилину, смуги фаз | 9 |
 | `graphs/lab10-errors.png` | помилки за хвилину з порогом 10 і смугою ALARM; частка помилок, % | 9 |
 | `graphs/lab10-latency.png` | Average і Maximum Latency з порогом 200 мс і смугою ALARM | 9 |
