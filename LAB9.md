@@ -9,23 +9,23 @@
 ## Архітектура
 
 ```
-               curl / load.sh / failover-demo.sh / compare.sh
-                                 │ HTTP 127.0.0.1:8080
-                ┌────────────────▼─────────────────┐
-                │ nginx 1.28 (upstream, round-robin,│
-                │ max_fails=2 fail_timeout=5s)      │
-                └───┬──────────────┬──────────────┬─┘
-        172.30.9.11 │  172.30.9.12 │  172.30.9.13 │   :8000
-             ┌──────▼─────┐ ┌──────▼─────┐ ┌──────▼─────┐
-             │ app1        │ │ app2       │ │ app3       │  один образ bookings-app:lab9,
-             │ instance-1  │ │ instance-2 │ │ instance-3 │  різний INSTANCE_ID
-             └──────┬──────┘ └─────┬──────┘ └─────┬──────┘
-                    └──────────────┼──────────────┘ boto3, AWS_ENDPOINT_URL
-                          ┌────────▼────────┐
-                          │ LocalStack 4.9.2│  DynamoDB, таблиця bookings
-                          └─────────────────┘  (створює init-table, одноразово)
+     curl / load.sh / failover-demo.sh / compare.sh
+                      │ HTTP 127.0.0.1:8080
+     ┌────────────────▼────────────────────────────┐
+     │ nginx 1.28: upstream bookings_backend,      │
+     │ round-robin, max_fails=2 fail_timeout=5s    │
+     └──────┬────────────────┬────────────────┬────┘
+            │ .11:8000       │ .12:8000       │ .13:8000
+     ┌──────▼─────┐   ┌──────▼─────┐   ┌──────▼─────┐
+     │ app1       │   │ app2       │   │ app3       │  образ bookings-app:lab9
+     │ instance-1 │   │ instance-2 │   │ instance-3 │  (server.py + handler.py)
+     └──────┬─────┘   └──────┬─────┘   └──────┬─────┘
+            └────────────────┼────────────────┘  boto3, AWS_ENDPOINT_URL
+                    ┌────────▼─────────┐
+                    │ LocalStack 4.9.2 │  DynamoDB: таблиця bookings
+                    └──────────────────┘  (створює init-table, одноразово)
 
-   app-single (профіль nolb) ── 127.0.0.1:8081 ── той самий образ, без балансувальника
+     app-single (профіль nolb): той самий образ напряму на 127.0.0.1:8081
 ```
 
 Кожна відповідь має заголовок `X-Instance-Id: instance-N`. `GET /health` повертає
@@ -148,3 +148,8 @@ nginx на цьому навантаженні не помітні. Різниц
   (`--scale`) потрібен DNS-резолвінг або service discovery.
 - Вимірювання — на одному ноутбуці (Docker Desktop, macOS), невелике навантаження з одного
   клієнта. Абсолютні числа часу не переносяться на реальне середовище.
+
+## Звіт
+
+Реальні знімки екрана — `reports/screens/9-*.png`, чекліст кадрів — `reports/lab9-checklist.md`,
+PDF-звіт — `reports/lab9-loadbalancing.pdf` (перезбирання: `.venv/bin/python reports/build_report.py 9`).

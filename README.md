@@ -166,7 +166,7 @@ destroy.sh                видалення ресурсів
 smoke-test.sh             e2e-перевірка через curl + jq
 docker-compose.yml        LocalStack 4.9.2
 Makefile                  up / deploy / smoke / test / destroy / down / venv / lab9-*
-reports/                  знімки екрана, чеклісти, генератор PDF-звітів (build_report.py)
+reports/                  знімки екрана, чеклісти, PDF-звіти лаб 8 і 9 (build_report.py [8|9])
 DEFENSE-LAB8.md           шпаргалка для захисту лаби 8
 LAB9.md, DEFENSE-LAB9.md  лаба 9: опис і шпаргалка
 ```

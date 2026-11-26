@@ -1,8 +1,13 @@
-"""Збирає PDF-звіт лаби 8 зі знімків екрана reports/screens/: .venv/bin/python reports/build_report.py"""
+"""Збирає PDF-звіти лаб 8 і 9 зі знімків екрана reports/screens/.
+
+.venv/bin/python reports/build_report.py        # обидва звіти
+.venv/bin/python reports/build_report.py 9      # лише лаба 9
+"""
 
 import sys
 from pathlib import Path
 
+from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
@@ -17,10 +22,16 @@ from reportlab.platypus import (
     Preformatted,
     SimpleDocTemplate,
     Spacer,
+    Table,
+    TableStyle,
 )
 
 STUDENT = "Бабин Богдан Олегович"
-GROUP = "443a"
+GROUP = "443a"  # лаба 8 (як було в її звіті)
+GROUP_LAB9 = "143a"
+UNIVERSITY = "Чернівецький національний університет імені Юрія Федьковича"
+INSTITUTE = "Навчально-науковий інститут фізико-технічних та комп'ютерних наук"
+REPO = "github.com/MarcoGr11/DevOps-aws"
 
 HERE = Path(__file__).resolve().parent
 SCREENS = HERE / "screens"
@@ -42,7 +53,7 @@ CODE = ParagraphStyle("code", fontName="Menlo", fontSize=8, leading=10.5, spaceA
 
 # (вимога методички, [(код кадру, підпис, що видно)]); код — префікс імені файлу в screens/,
 # кадр може бути розбитий на частини: 8-04a-..., 8-04b-...
-SECTIONS = [
+SECTIONS = [  # лаба 8
     (
         "Вимога 1. LocalStack, AWS CLI і засоби взаємодії з локальними AWS API",
         [
@@ -203,6 +214,234 @@ CONCLUSION = [
 ]
 
 
+# ---------------------------------------------------------------- лаба 9
+GOAL9 = (
+    "Розгорнути кілька екземплярів HTTP-застосунку бронювання коворкінгу з лаби 8, налаштувати "
+    "балансування вхідних запитів і дослідити поведінку системи при зміні кількості доступних "
+    "екземплярів, а також порівняти її з варіантом без балансувальника."
+)
+
+ARCH9 = """\
+     curl / load.sh / failover-demo.sh / compare.sh
+                      │ HTTP 127.0.0.1:8080
+     ┌────────────────▼────────────────────────────┐
+     │ nginx 1.28: upstream bookings_backend,      │
+     │ round-robin, max_fails=2 fail_timeout=5s    │
+     └──────┬────────────────┬────────────────┬────┘
+            │ .11:8000       │ .12:8000       │ .13:8000
+     ┌──────▼─────┐   ┌──────▼─────┐   ┌──────▼─────┐
+     │ app1       │   │ app2       │   │ app3       │  образ bookings-app:lab9
+     │ instance-1 │   │ instance-2 │   │ instance-3 │  (server.py + handler.py)
+     └──────┬─────┘   └──────┬─────┘   └──────┬─────┘
+            └────────────────┼────────────────┘  boto3, AWS_ENDPOINT_URL
+                    ┌────────▼─────────┐
+                    │ LocalStack 4.9.2 │  DynamoDB: таблиця bookings
+                    └──────────────────┘  (створює init-table, одноразово)
+
+     app-single (профіль nolb): той самий образ напряму на 127.0.0.1:8081"""
+
+ARCH9_TEXT = [
+    "Бізнес-логіку лаби 8 не переписано. Тонкий адаптер app/server.py (stdlib http.server) "
+    "перетворює HTTP-запит на подію у форматі API Gateway proxy (httpMethod, resource, "
+    "pathParameters, headers, body) і викликає той самий lambda_handler. Dockerfile збирається з "
+    "кореня репозиторію й копіює lambda/handler.py без дублювання коду. Образ: python:3.12-slim, "
+    "непривілейований користувач, HEALTHCHECK на /health.",
+    "Ідентифікатор екземпляра задає змінна INSTANCE_ID. Він повертається в тілі /health і в "
+    "заголовку X-Instance-Id кожної відповіді. Стан зберігається лише в DynamoDB, тому будь-який "
+    "екземпляр може обробити будь-який запит. Стек описано окремим docker-compose.lab9.yml, і "
+    "файли лаби 8 не змінювались.",
+    "Фіксовані IP бекендів (extra_hosts у nginx) замість DNS Docker: з resolve один запит із 30 "
+    "отримав 502 через гонку між повтором і перерезолвленням імені зупиненого екземпляра.",
+]
+
+STEPS9 = [
+    "docker compose -f docker-compose.lab9.yml up -d --build --wait — збірка образу, LocalStack, "
+    "init-table (ідемпотентно створює таблицю), app1–app3, nginx; nginx стартує лише після "
+    "healthy-стану трьох бекендів (depends_on: service_healthy);",
+    "curl /health і scripts/lab9/load.sh 30 — розподіл запитів за X-Instance-Id і POST через "
+    "балансувальник у спільну таблицю;",
+    "docker compose stop app2 → load.sh: поведінка балансувальника при відмові екземпляра;",
+    "docker compose start app2 → healthy → load.sh: повернення екземпляра в ротацію;",
+    "scripts/lab9/compare.sh — порівняння з балансувальником (:8080) і без (app-single на :8081);",
+    "make test — юніт-тести адаптера і лаби 8, ruff; прибирання: docker compose "
+    "-f docker-compose.lab9.yml --profile nolb down.",
+]
+
+SECTIONS9 = [
+    (
+        "Вимога 1. Контейнеризована версія застосунку",
+        [
+            (
+                "9-01",
+                "Структура проєкту і app/Dockerfile",
+                "Додано app/ (адаптер, Dockerfile, ініціалізація таблиці), nginx/, scripts/lab9/ і "
+                "docker-compose.lab9.yml. Dockerfile копіює lambda/handler.py, запускає застосунок від "
+                "користувача app (uid 10001) і має HEALTHCHECK на /health.",
+            ),
+        ],
+    ),
+    (
+        "Вимоги 2 і 4. Три екземпляри з власним ідентифікатором, endpoint /health",
+        [
+            (
+                "9-03",
+                "Запуск стеку: docker compose up --wait і ps",
+                "app1–app3 (один образ bookings-app:lab9), nginx і localstack у стані healthy; "
+                "init-table завершився з кодом 0 після створення таблиці.",
+            ),
+            (
+                "9-04",
+                "Шість запитів GET /health через балансувальник",
+                "Кожна відповідь — 200 з заголовком X-Instance-Id і полем instance у тілі; екземпляри "
+                "чергуються 1 → 2 → 3 → 1 → 2 → 3.",
+            ),
+        ],
+    ),
+    (
+        "Вимога 3. Балансувальник для маршрутизації запитів",
+        [
+            (
+                "9-02",
+                "Сервіси compose і конфігурація nginx (без коментарів)",
+                "Сервіси localstack, init-table, app1–app3, nginx. Upstream з трьох серверів з "
+                "max_fails=2 fail_timeout=5s, /nginx-health, короткий connect-таймаут і "
+                "proxy_next_upstream для повтору на іншому екземплярі.",
+            ),
+        ],
+    ),
+    (
+        "Вимога 5. Серія запитів і розподіл між екземплярами",
+        [
+            (
+                "9-05",
+                "load.sh 30: розподіл і запис у спільну БД",
+                "30 запитів розподілено рівно 10/10/10, усі 200. Три POST обробили три різні "
+                "екземпляри, а список, отриманий з instance-1, містить усі 3 записи.",
+            ),
+            (
+                "9-06",
+                "Запис, створений одним екземпляром, читають інші",
+                "POST обробив instance-2 (201). Два GET того самого id повернули запис з instance-3 і "
+                "instance-1, тобто дані спільні, а не в пам'яті екземпляра.",
+            ),
+        ],
+    ),
+    (
+        "Вимога 6. Виведення екземпляра з роботи",
+        [
+            (
+                "9-07",
+                "docker compose stop app2",
+                "app2 — Exited (0); app1, app3, nginx і localstack працюють далі (healthy).",
+            ),
+            (
+                "9-08",
+                "load.sh 30 при зупиненому app2",
+                "30/30 відповідей 200, лише instance-1 (14) і instance-3 (16). Середній час 0,070 с, "
+                "максимальний 1,025 с: запити, які nginx спрямував на app2, чекали connect-таймаут 1 с "
+                "і були повторені на іншому екземплярі.",
+            ),
+        ],
+    ),
+    (
+        "Вимога 7. Відновлення екземпляра",
+        [
+            (
+                "9-09",
+                "docker compose start app2 і ps",
+                "Через 7 с після старту app2 у стані healthy. init-table повторно відпрацював "
+                "ідемпотентно (таблиця вже існувала).",
+            ),
+            (
+                "9-10",
+                "load.sh 30 після відновлення",
+                "app2 знову в ротації: розподіл 10/10/10, 30/30 відповідей 200, максимальний час 0,017 с.",
+            ),
+        ],
+    ),
+    (
+        "Вимога 8. Порівняння системи з балансуванням і без",
+        [
+            (
+                "9-11",
+                "compare.sh: з балансувальником (:8080) і без (app-single на :8081)",
+                "Коли всі екземпляри працюють, обидва варіанти дають 100% успіху з однаковим середнім "
+                "часом 0,002 с. При відмові одного екземпляра з балансувальником успіх 100% (сер. час "
+                "0,070 с), без нього — 0% (з'єднання відхилено).",
+            ),
+        ],
+    ),
+    (
+        "Тести і репозиторій",
+        [
+            (
+                "9-12",
+                "make test: pytest і ruff",
+                "21 тест пройдено: 16 тестів лаби 8 без змін і 5 тестів адаптера (перетворення "
+                "запиту в подію, X-Instance-Id, /health, реальний HTTP-обмін). ruff — без зауважень.",
+            ),
+            (
+                "9-13",
+                "Історія комітів у репозиторії DevOps-aws",
+                "Лаба 9 додана окремими комітами (адаптер, балансувальник, скрипти, документація) "
+                "поверх комітів лаби 8.",
+                10,  # сторінка браузера: шрифт крупніший, ніж у терміналі
+            ),
+        ],
+    ),
+]
+
+EXTRA = {
+    "9-10": lambda: KeepTogether(
+        [
+            p("Підсумок етапів (за трьома вимірюваннями load.sh 30 вище):", BODY),
+            table(
+                [
+                    ["Етап", "200", "Помилки", "app1", "app2", "app3", "Сер. час, с", "Макс., с"],
+                    ["усі працюють", "30", "0", "10", "10", "10", "0,002", "0,007"],
+                    ["app2 зупинено", "30", "0", "14", "0", "16", "0,070", "1,025"],
+                    ["app2 відновлено", "30", "0", "10", "10", "10", "0,004", "0,017"],
+                ],
+                [3.4, 1.2, 1.6, 1.3, 1.3, 1.3, 2.2, 1.7],
+            ),
+            Spacer(1, 12),
+        ]
+    ),
+    "9-11": lambda: KeepTogether(
+        [
+            p("Таблиця порівняння (30 запитів GET /health на сценарій):", BODY),
+            table(
+                [
+                    ["Сценарій", "Всього", "200", "Помилки", "Успіх, %", "Сер. час, с"],
+                    ["з балансуванням, працюють 3 з 3", "30", "30", "0", "100", "0,002"],
+                    ["без балансування, працює 1 з 1", "30", "30", "0", "100", "0,002"],
+                    ["з балансуванням, працюють 2 з 3", "30", "30", "0", "100", "0,070"],
+                    ["без балансування, працює 0 з 1", "30", "0", "30", "0", "—"],
+                ],
+                [5.8, 1.5, 1.2, 1.7, 1.7, 2.1],
+            ),
+            Spacer(1, 12),
+        ]
+    ),
+}
+
+CONCLUSION9 = [
+    "Застосунок лаби 8 контейнеризовано без зміни бізнес-логіки й запущено в трьох екземплярах за "
+    "nginx. Запити розподіляються по черзі (10/10/10 на 30 запитів). Дані спільні: запис, створений "
+    "одним екземпляром, читають інші. Після зупинки одного екземпляра всі 30 запитів успішні, а після "
+    "його запуску він знову отримує свою третину запитів. Без балансувальника відмова єдиного "
+    "екземпляра дає 100% помилок, з балансувальником — 0%.",
+    "Ціна доступності — затримка в момент виявлення відмови. Open-source nginx має лише пасивні "
+    "health-check: про зупинений екземпляр він дізнається з невдалої спроби з'єднання, тому окремі "
+    "запити тривали ≈1 с (proxy_connect_timeout), а середній час зріс з 0,002 до 0,070 с. Після двох "
+    "невдач екземпляр виключається на 5 с. Активні перевірки дали б змогу виключати його заздалегідь.",
+    "Обмеження: round-robin не враховує навантаження екземплярів; nginx і DynamoDB лишаються "
+    "єдиними точками відмови; фіксовані IP бекендів забезпечують детермінований failover, але "
+    "ускладнюють динамічне масштабування. Усі числа виміряно на одному комп'ютері з невеликим "
+    "навантаженням з одного клієнта, тож вони ілюструють поведінку, а не продуктивність.",
+]
+
+
 def p(text, style=BODY):
     return Paragraph(text, style)
 
@@ -211,10 +450,10 @@ def frame_files(code):
     return sorted(SCREENS.glob(f"{code}*.png"))
 
 
-def figure(n, path, title, seen, head=()):
+def figure(n, path, title, seen, head=(), width=17 * cm, max_h=21 * cm):
     img = Image(str(path))
-    # на всю ширину сторінки, щоб текст терміналу читався; дуже високі кадри обмежуємо висотою
-    scale = min(17 * cm / img.imageWidth, 21 * cm / img.imageHeight)
+    # ширина — щоб текст терміналу читався; дуже високі кадри обмежуємо висотою
+    scale = min(width / img.imageWidth, max_h / img.imageHeight)
     img.drawWidth, img.drawHeight = img.imageWidth * scale, img.imageHeight * scale
     parts = [*head, img, p(f"Рис. {n}. {title}", CAPTION)]  # заголовок розділу — разом з першим рисунком
     if seen:
@@ -222,11 +461,47 @@ def figure(n, path, title, seen, head=()):
     return KeepTogether([*parts, Spacer(1, 10)])
 
 
-def main():
-    missing = [code for _, frames in SECTIONS for code, _, _ in frames if not frame_files(code)]
+def figures(sections, width=17 * cm, max_h=21 * cm, head=()):
+    missing = [f[0] for _, frames in sections for f in frames if not frame_files(f[0])]
     if missing:
         sys.exit(f"немає знімків у reports/screens/: {', '.join(missing)}")
+    story, n = [], 0
+    for heading, frames in sections:
+        head = [*head, p(heading, H2)]
+        for code, title, seen, *w in frames:
+            files = frame_files(code)
+            for k, path in enumerate(files, 1):
+                n += 1
+                part = f" (частина {k} з {len(files)})" if len(files) > 1 else ""
+                last = k == len(files)
+                story.append(
+                    figure(
+                        n, path, title + part, seen if last else "", head, w[0] * cm if w else width, max_h
+                    )
+                )
+                head = []
+                if last and code in EXTRA:
+                    story.append(EXTRA[code]())
+    return story, n
 
+
+def write(name, title, story, n):
+    doc = SimpleDocTemplate(
+        str(HERE / name),
+        pagesize=A4,
+        title=title,
+        author=STUDENT,
+        leftMargin=2 * cm,
+        rightMargin=2 * cm,
+        topMargin=1.8 * cm,
+        bottomMargin=1.8 * cm,
+    )
+    doc.build(story)
+    print(f"reports/{name}: {n} рисунків, {doc.page} с.")
+
+
+def lab8():
+    body, n = figures(SECTIONS)
     story = [
         Spacer(1, 5 * cm),
         p("Лабораторна робота №8", TITLE),
@@ -238,7 +513,7 @@ def main():
         p(f"Виконав: студент групи {GROUP}", RIGHT),
         p(STUDENT, RIGHT),
         Spacer(1, 1 * cm),
-        p("Репозиторій: github.com/MarcoGr11/DevOps-aws", CENTER),
+        p(f"Репозиторій: {REPO}", CENTER),
         PageBreak(),
         p("Мета", H1),
         p(
@@ -258,31 +533,65 @@ def main():
         *[p(f"{i}. {s}") for i, s in enumerate(DEPLOY_STEPS, 1)],
         PageBreak(),
         p("Хід виконання", H1),
+        *body,
+        KeepTogether([p("Висновок", H1), *[p(t) for t in CONCLUSION]]),
     ]
-    n = 0
-    for heading, frames in SECTIONS:
-        head = [p(heading, H2)]
-        for code, title, seen in frames:
-            files = frame_files(code)
-            for k, path in enumerate(files, 1):
-                n += 1
-                part = f" (частина {k} з {len(files)})" if len(files) > 1 else ""
-                story.append(figure(n, path, title + part, seen if k == len(files) else "", head))
-                head = []
-    story.append(KeepTogether([p("Висновок", H1), *[p(t) for t in CONCLUSION]]))
+    write("lab8-localstack.pdf", "Лабораторна робота №8", story, n)
 
-    doc = SimpleDocTemplate(
-        str(HERE / "lab8-localstack.pdf"),
-        pagesize=A4,
-        title="Лабораторна робота №8",
-        author=STUDENT,
-        leftMargin=2 * cm,
-        rightMargin=2 * cm,
-        topMargin=1.8 * cm,
-        bottomMargin=1.8 * cm,
+
+def table(rows, widths):
+    t = Table(rows, colWidths=[w * cm for w in widths], hAlign="CENTER")
+    t.setStyle(
+        TableStyle(
+            [
+                ("FONT", (0, 0), (-1, -1), "Arial", 9.5),
+                ("FONT", (0, 0), (-1, 0), "Arial-Bold", 9.5),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
     )
-    doc.build(story)
-    print(f"reports/lab8-localstack.pdf: {n} рисунків")
+    return t
+
+
+def lab9():
+    # 11 см: по два кадри на сторінку, текст терміналу ще читається (≈8–9 pt)
+    body, n = figures(SECTIONS9, width=11 * cm, max_h=19 * cm, head=[p("Хід виконання", H1)])
+    story = [
+        p(UNIVERSITY, CENTER),
+        p(INSTITUTE, CENTER),
+        Spacer(1, 4 * cm),
+        p("Лабораторна робота №9", TITLE),
+        p("з курсу «Технології DevOps»", CENTER),
+        Spacer(1, 1 * cm),
+        p("<b>Балансування навантаження та забезпечення доступності хмарного застосунку</b>", CENTER),
+        p("Предметна область: система бронювання коворкінгу", CENTER),
+        Spacer(1, 4 * cm),
+        p(f"Виконав: студент групи {GROUP_LAB9}", RIGHT),
+        p(STUDENT, RIGHT),
+        Spacer(1, 1 * cm),
+        p(f"Репозиторій: {REPO}", CENTER),
+        PageBreak(),
+        p("Мета", H1),
+        p(GOAL9),
+        p("Архітектура", H1),
+        Preformatted(ARCH9, CODE),
+        *[p(t) for t in ARCH9_TEXT],
+        p("Послідовність запуску і дослідження", H1),
+        *[p(f"{i}. {s}") for i, s in enumerate(STEPS9, 1)],
+        PageBreak(),
+        *body,
+        KeepTogether([p("Висновок", H1), *[p(t) for t in CONCLUSION9]]),
+    ]
+    write("lab9-loadbalancing.pdf", "Лабораторна робота №9", story, n)
+
+
+def main():
+    labs = {"8": lab8, "9": lab9}
+    for key in sys.argv[1:] or labs:
+        labs[key]()
 
 
 if __name__ == "__main__":
