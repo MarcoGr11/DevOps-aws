@@ -1,5 +1,6 @@
-"""Збирає PDF-звіт лаби 8 з кадрів reports/screens/: .venv/bin/python reports/build_report.py"""
+"""Збирає PDF-звіт лаби 8 зі знімків екрана reports/screens/: .venv/bin/python reports/build_report.py"""
 
+import sys
 from pathlib import Path
 
 from reportlab.lib.enums import TA_CENTER
@@ -18,6 +19,9 @@ from reportlab.platypus import (
     Spacer,
 )
 
+STUDENT = "Бабин Богдан Олегович"
+GROUP = "443a"
+
 HERE = Path(__file__).resolve().parent
 SCREENS = HERE / "screens"
 FONTS = Path("/System/Library/Fonts/Supplemental")
@@ -29,82 +33,128 @@ BODY = ParagraphStyle("body", fontName="Arial", fontSize=11, leading=15, spaceAf
 H1 = ParagraphStyle(
     "h1", parent=BODY, fontName="Arial-Bold", fontSize=16, leading=20, spaceBefore=8, spaceAfter=8
 )
+H2 = ParagraphStyle("h2", parent=H1, fontSize=13, leading=17, spaceBefore=6, spaceAfter=6)
 TITLE = ParagraphStyle("title", parent=H1, fontSize=20, leading=26, alignment=TA_CENTER)
 CENTER = ParagraphStyle("center", parent=BODY, alignment=TA_CENTER)
+RIGHT = ParagraphStyle("right", parent=BODY, alignment=2)
 CAPTION = ParagraphStyle("caption", parent=BODY, fontSize=10, alignment=TA_CENTER, spaceBefore=4)
 CODE = ParagraphStyle("code", fontName="Menlo", fontSize=8, leading=10.5, spaceAfter=8)
 
-FRAMES = [
+# (вимога методички, [(код кадру, підпис, що видно)]); код — префікс імені файлу в screens/,
+# кадр може бути розбитий на частини: 8-04a-..., 8-04b-...
+SECTIONS = [
     (
-        "8-01-localstack-health",
-        "LocalStack у Docker і його health-check",
-        "Контейнер localstack/localstack:4.9.2 у стані healthy на 127.0.0.1:4566; сервіси lambda, "
-        "apigateway, dynamodb, iam, logs, cloudwatch — running.",
+        "Вимога 1. LocalStack, AWS CLI і засоби взаємодії з локальними AWS API",
+        [
+            (
+                "8-01",
+                "LocalStack у Docker і його health-check",
+                "Контейнер localstack/localstack:4.9.2 у стані healthy; /_localstack/health показує "
+                "edition community, сервіси lambda, dynamodb, apigateway доступні.",
+            ),
+            (
+                "8-02",
+                "Структура проєкту і docker-compose.yml",
+                "Код Lambda, тести, скрипти deploy/destroy/smoke-test, Makefile; сервіс localstack з "
+                "портом 4566, списком SERVICES, docker.sock і healthcheck.",
+            ),
+        ],
     ),
     (
-        "8-02-project-structure",
-        "Структура проєкту і маршрутизація в Lambda",
-        "Код функції, тести, скрипти розгортання, Makefile. lambda_handler вибирає обробник за "
-        "event.resource та event.httpMethod; помилки сховища дають 500.",
+        "Вимога 2. Lambda-функція з обробкою HTTP-запитів",
+        [
+            (
+                "8-03",
+                "Маршрутизація і обробка помилок у lambda/handler.py",
+                "lambda_handler вибирає обробник за event.resource і event.httpMethod; виняток сховища "
+                "перетворюється на 500, невідомий маршрут — на 404.",
+            ),
+        ],
     ),
     (
-        "8-03-deploy",
-        "Перше розгортання ./deploy.sh",
-        "За 7 кроків створено таблицю, zip, IAM-роль, функцію, REST API з 5 методами AWS_PROXY, "
-        "дозвіл на виклик і stage dev; надруковано URL і відповідь /health.",
+        "Вимоги 3–4. Таблиця DynamoDB і API Gateway з маршрутизацією до Lambda",
+        [
+            (
+                "8-05",
+                "Створені ресурси в LocalStack",
+                "Таблиця bookings, функція bookings-api (python3.12, handler.lambda_handler) і REST API "
+                "bookings-api з id dohs5f21ur — той самий id, що в URL з кадру 8-04.",
+            ),
+        ],
     ),
     (
-        "8-04-resources",
-        "Створені ресурси в LocalStack",
-        "Таблиця bookings, функція bookings-api (python3.12, TABLE_NAME), REST API bookings-api "
-        "і його ресурси /health, /bookings, /bookings/{id} з методами.",
+        "Вимоги 5–6. Створення, отримання, видалення записів і перевірка через curl",
+        [
+            (
+                "8-06",
+                "Створення бронювання: POST /bookings",
+                "201 CREATED, Content-Type: application/json; у тілі запис зі згенерованими id і created_at.",
+            ),
+            (
+                "8-07",
+                "Отримання бронювання: GET /bookings/{id}",
+                "200 OK і той самий запис, прочитаний з DynamoDB.",
+            ),
+            (
+                "8-08",
+                "Список бронювань: GET /bookings",
+                "Після другого POST список містить обидва записи, count = 2.",
+            ),
+            (
+                "8-09",
+                "Дані безпосередньо в DynamoDB: dynamodb scan",
+                "Count = 2; атрибути запису збережені як рядки (тип S) з тими самими значеннями, "
+                "що повернув API.",
+            ),
+            (
+                "8-10",
+                "Видалення: DELETE /bookings/{id} і повторний GET",
+                'DELETE повертає 200 {"deleted": id}, наступний GET — 404 booking not found.',
+            ),
+            (
+                "8-11",
+                "Некоректне тіло запиту",
+                "Битий JSON → 400 invalid JSON body; порожній user, дата 2026-02-30 і slot 12:00-10:00 → "
+                "400 validation failed з усіма трьома помилками.",
+            ),
+        ],
     ),
     (
-        "8-05-post-booking",
-        "Створення бронювання: POST /bookings",
-        "201 CREATED, Content-Type: application/json; у тілі запис зі згенерованими id та created_at.",
+        "Вимога 7. Автоматизація розгортання скриптом AWS CLI",
+        [
+            (
+                "8-04",
+                "Перше розгортання ./deploy.sh (з нуля)",
+                "За 7 кроків створено таблицю, zip, IAM-роль, функцію, REST API з 5 методами AWS_PROXY, "
+                "дозвіл на виклик і stage dev; надруковано URL і відповідь /health.",
+            ),
+            (
+                "8-14",
+                "Повторний запуск ./deploy.sh (ідемпотентність)",
+                "Таблиця, роль, функція і API «вже існують» з тим самим api-id; оновлено лише код і "
+                "створено новий deployment.",
+            ),
+            (
+                "8-12",
+                "Автоматична перевірка ./smoke-test.sh",
+                "Усі перевірки (health, POST, GET, список, DELETE, 404, 400) — OK.",
+            ),
+            (
+                "8-13",
+                "Юніт-тести і лінтер: make test",
+                "pytest — 16 passed (DynamoDB замінено заглушкою), ruff check — All checks passed.",
+            ),
+        ],
     ),
     (
-        "8-06-get-booking",
-        "Отримання бронювання: GET /bookings/{id}",
-        "200 OK і той самий запис, прочитаний з DynamoDB.",
-    ),
-    (
-        "8-07-list-bookings",
-        "Список бронювань: GET /bookings",
-        "Після другого POST список містить 2 записи, count = 2.",
-    ),
-    (
-        "8-08-dynamodb-scan",
-        "Записи безпосередньо в DynamoDB",
-        "awslocal dynamodb scan показує обидва записи з типами атрибутів (S).",
-    ),
-    (
-        "8-09-delete-then-404",
-        "Видалення: DELETE /bookings/{id}, потім GET",
-        'DELETE повертає 200 {"deleted": id}, наступний GET — 404 booking not found.',
-    ),
-    (
-        "8-10-smoke-test",
-        "Автоматична перевірка ./smoke-test.sh",
-        "Усі 11 перевірок (health, POST, GET, список, DELETE, 404, 400) пройдено, exit code 0.",
-    ),
-    (
-        "8-11-pytest-ruff",
-        "Юніт-тести і лінтер",
-        "pytest: 16 passed (CRUD, валідація, 400/404/500, Decimal); ruff check і ruff format --check чисті.",
-    ),
-    (
-        "8-12-deploy-idempotent",
-        "Повторний запуск ./deploy.sh (ідемпотентність)",
-        "Таблиця, роль, функція і API «вже існують» (той самий API id), оновлено лише код і "
-        "створено новий deployment.",
-    ),
-    (
-        "8-13-bad-request-400",
-        "Обробка некоректного тіла запиту",
-        "Битий JSON → 400 invalid JSON body; порожній user, неіснуюча дата 2026-02-30 і slot "
-        "12:00-10:00 → 400 validation failed з переліком помилок.",
+        "Вимога 8. Документація і репозиторій",
+        [
+            (
+                "8-15",
+                "Репозиторій DevOps-aws на GitHub",
+                "Історія комітів гілки main: LocalStack, Lambda з тестами, скрипти, документація, звіт.",
+            ),
+        ],
     ),
 ]
 
@@ -130,8 +180,26 @@ DEPLOY_STEPS = [
     "5) створює функцію або оновлює її код і конфігурацію; 6) створює REST API, ресурси, методи, "
     "AWS_PROXY-інтеграції і дозвіл lambda:InvokeFunction; 7) публікує stage dev, перевіряє /health "
     "і зберігає базовий URL у .api-url;",
-    "./smoke-test.sh — end-to-end перевірка через curl і jq;",
+    "./smoke-test.sh і make test — end-to-end перевірка через curl і юніт-тести;",
     "./destroy.sh — видалення ресурсів; docker compose down — зупинка LocalStack.",
+]
+
+CONCLUSION = [
+    "У LocalStack розгорнуто serverless-застосунок бронювання коворкінгу: REST API в API Gateway з "
+    "п'ятьма маршрутами через AWS_PROXY викликає Lambda-функцію на Python 3.12, яка зберігає записи в "
+    "таблиці DynamoDB bookings. Створення (201), отримання (200/404), список, видалення (200/404) і "
+    "валідацію (400) перевірено curl-ом наживо, скриптом smoke-test.sh і 16 юніт-тестами. Розгортання "
+    "виконується одним ідемпотентним скриптом deploy.sh: повторний запуск не створює дублікатів, а "
+    "оновлює код функції і публікує новий deployment.",
+    "Версія LocalStack. Образ localstack/localstack:latest (2026.11) без LOCALSTACK_AUTH_TOKEN "
+    "завершується з помилкою активації ліцензії. Тег 4.9.2 працює в community-режимі без акаунта і "
+    "містить усі потрібні сервіси, тому його закріплено в docker-compose.yml; це робить середовище "
+    "відтворюваним і не потребує секретів у репозиторії.",
+    "Квірк Content-Type. curl -d без заголовка надсилає application/x-www-form-urlencoded, і API "
+    "Gateway у LocalStack 4.9.2 перекодовує таке тіло у form-формат, тож Lambda отримує не JSON і "
+    "відповідає 400. У справжньому AWS proxy-інтеграція передає тіло без змін. Причину знайдено через "
+    "логування тіла в CloudWatch Logs; клієнти мають надсилати Content-Type: application/json, що "
+    "зафіксовано в README.",
 ]
 
 
@@ -139,15 +207,26 @@ def p(text, style=BODY):
     return Paragraph(text, style)
 
 
-def figure(n, name, title, seen, max_h=10.5 * cm):
-    path = SCREENS / f"{name}.png"
+def frame_files(code):
+    return sorted(SCREENS.glob(f"{code}*.png"))
+
+
+def figure(n, path, title, seen, head=()):
     img = Image(str(path))
-    scale = min(17 * cm / img.imageWidth, max_h / img.imageHeight)
+    # на всю ширину сторінки, щоб текст терміналу читався; дуже високі кадри обмежуємо висотою
+    scale = min(17 * cm / img.imageWidth, 21 * cm / img.imageHeight)
     img.drawWidth, img.drawHeight = img.imageWidth * scale, img.imageHeight * scale
-    return KeepTogether([img, p(f"Рис. {n}. {title}", CAPTION), p(f"<b>Що видно:</b> {seen}"), Spacer(1, 10)])
+    parts = [*head, img, p(f"Рис. {n}. {title}", CAPTION)]  # заголовок розділу — разом з першим рисунком
+    if seen:
+        parts.append(p(f"<b>Що видно:</b> {seen}"))
+    return KeepTogether([*parts, Spacer(1, 10)])
 
 
 def main():
+    missing = [code for _, frames in SECTIONS for code, _, _ in frames if not frame_files(code)]
+    if missing:
+        sys.exit(f"немає знімків у reports/screens/: {', '.join(missing)}")
+
     story = [
         Spacer(1, 5 * cm),
         p("Лабораторна робота №8", TITLE),
@@ -156,6 +235,9 @@ def main():
         p("<b>Розгортання serverless-застосунку в локальному AWS-середовищі (LocalStack)</b>", CENTER),
         p("Предметна область: система бронювання коворкінгу", CENTER),
         Spacer(1, 4 * cm),
+        p(f"Виконав: студент групи {GROUP}", RIGHT),
+        p(STUDENT, RIGHT),
+        Spacer(1, 1 * cm),
         p("Репозиторій: github.com/MarcoGr11/DevOps-aws", CENTER),
         PageBreak(),
         p("Мета", H1),
@@ -170,43 +252,37 @@ def main():
             "Lambda отримує весь HTTP-запит як event (AWS_PROXY) і маршрутизує його за resource та "
             "httpMethod. Адресу DynamoDB усередині LocalStack функція бере зі змінної AWS_ENDPOINT_URL, яку "
             "LocalStack передає в контейнер функції; у реальному AWS змінної немає і використовується "
-            "стандартний endpoint. Образ LocalStack закріплено на 4.9.2: latest (2026.11) без "
-            "LOCALSTACK_AUTH_TOKEN завершується з помилкою активації ліцензії."
+            "стандартний endpoint."
         ),
         p("Послідовність розгортання", H1),
         *[p(f"{i}. {s}") for i, s in enumerate(DEPLOY_STEPS, 1)],
         PageBreak(),
         p("Хід виконання", H1),
     ]
-    story += [figure(i, *frame) for i, frame in enumerate(FRAMES, 1)]
-    story.append(
-        KeepTogether(
-            [
-                p("Висновок", H1),
-                p(
-                    "У LocalStack 4.9.2 розгорнуто serverless-застосунок: REST API в API Gateway з п'ятьма "
-                    "маршрутами викликає Lambda-функцію на Python 3.12, яка зберігає бронювання в DynamoDB. "
-                    "Створення (201), отримання (200/404), список і видалення (200/404) та валідація (400) "
-                    "перевірені curl-ом вручну і скриптом smoke-test.sh; логіку покрито 16 юніт-тестами. "
-                    "Розгортання виконується одним ідемпотентним скриптом deploy.sh — повторний запуск не "
-                    "створює дублікатів. Виявлено обмеження LocalStack: тіло з Content-Type "
-                    "application/x-www-form-urlencoded перекодовується, тому клієнти мають надсилати "
-                    "application/json."
-                ),
-            ]
-        )
-    )
+    n = 0
+    for heading, frames in SECTIONS:
+        head = [p(heading, H2)]
+        for code, title, seen in frames:
+            files = frame_files(code)
+            for k, path in enumerate(files, 1):
+                n += 1
+                part = f" (частина {k} з {len(files)})" if len(files) > 1 else ""
+                story.append(figure(n, path, title + part, seen if k == len(files) else "", head))
+                head = []
+    story.append(KeepTogether([p("Висновок", H1), *[p(t) for t in CONCLUSION]]))
+
     doc = SimpleDocTemplate(
         str(HERE / "lab8-localstack.pdf"),
         pagesize=A4,
         title="Лабораторна робота №8",
+        author=STUDENT,
         leftMargin=2 * cm,
         rightMargin=2 * cm,
         topMargin=1.8 * cm,
         bottomMargin=1.8 * cm,
     )
     doc.build(story)
-    print("reports/lab8-localstack.pdf")
+    print(f"reports/lab8-localstack.pdf: {n} рисунків")
 
 
 if __name__ == "__main__":

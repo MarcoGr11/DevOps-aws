@@ -161,7 +161,7 @@ destroy.sh                видалення ресурсів
 smoke-test.sh             e2e-перевірка через curl + jq
 docker-compose.yml        LocalStack 4.9.2
 Makefile                  up / deploy / smoke / test / destroy / down / venv
-reports/                  скріни, генератори скрінів і PDF-звіту, чекліст
+reports/                  знімки екрана, чекліст, генератор PDF-звіту (build_report.py)
 DEFENSE-LAB8.md           шпаргалка для захисту
 ```
 
