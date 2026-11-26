@@ -1,9 +1,11 @@
-"""Збирає PDF-звіти лаб 8 і 9 зі знімків екрана reports/screens/.
+"""Збирає PDF-звіти лаб 8, 9 і 10 зі знімків екрана reports/screens/ (і графіків reports/graphs/).
 
-.venv/bin/python reports/build_report.py        # обидва звіти
+.venv/bin/python reports/build_report.py        # усі звіти
 .venv/bin/python reports/build_report.py 9      # лише лаба 9
 """
 
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -441,12 +443,251 @@ CONCLUSION9 = [
 ]
 
 
+# ---------------- лаба 10 ----------------
+GOAL10 = (
+    "Організувати збір і аналіз метрик хмарного застосунку за допомогою Amazon CloudWatch (у "
+    "LocalStack): публікувати кількість запитів, помилок і тривалість обробки, отримувати й "
+    "обчислювати статистику, налаштувати alarm на перевищення порогів і перевірити їх реакцію "
+    "на керовану деградацію під навантаженням."
+)
+
+ARCH10 = """\
+   loadgen.py / curl ── HTTP 127.0.0.1:8080 ──► nginx (round-robin, лаба 9)
+                                                  │
+              ┌───────────────────┬───────────────┴───┐
+        ┌─────▼──────┐      ┌─────▼──────┐      ┌─────▼──────┐
+        │ app1 :8101 │      │ app2 :8102 │      │ app3 :8103 │  server.py:
+        │ instance-1 │      │ instance-2 │      │ instance-3 │  MetricsPublisher
+        └─────┬──────┘      └─────┬──────┘      └─────┬──────┘  + /admin/chaos
+              └───────────────────┼───────────────────┘
+                     boto3: DynamoDB + PutMetricData
+   ┌──────────────────────────────▼─────────────────────────────┐
+   │ LocalStack 4.9.2 (127.0.0.1:4567)                           │
+   │ DynamoDB bookings │ CloudWatch: namespace Bookings, alarms  │
+   │                   │   └─► SNS bookings-alerts ─► SQS queue  │
+   └─────────────────────────────────────────────────────────────┘
+   stats.py, plot.py, alarm-watch.sh — CloudWatch API"""
+
+ARCH10_TEXT = [
+    "На незмінений docker-compose.lab9.yml накладається docker-compose.lab10.yml: LocalStack "
+    "отримує cloudwatch, sns, sqs (порт 4567), екземпляри — CLOUDWATCH_ENABLED=1, ENABLE_CHAOS=1 "
+    "і прямі порти 8101–8103.",
+    "Метрики публікує застосунок, а не nginx: лише він знає код відповіді, свій InstanceId і "
+    "чистий час обробки; nginx не пише в CloudWatch без окремого агента.",
+]
+
+METRICS10 = [
+    ["Метрика", "Unit", "Значення на запит", "Статистика"],
+    ["RequestCount", "Count", "1", "Sum"],
+    ["ErrorCount", "Count", "1, якщо статус ≥ 500, інакше 0", "Sum"],
+    ["Latency", "Milliseconds", "час обробки в застосунку", "Average, Maximum"],
+]
+
+METRICS10_TEXT = [
+    "Кожна точка публікується двічі: без вимірів (агрегат для alarm) і з InstanceId (пошук "
+    "винного екземпляра); /health і /admin/* не міряються. Запит лише кладе 6 точок у чергу, "
+    "фоновий потік шле PutMetricData раз на 1 с або по 20 точок; помилку CloudWatch лише журналює.",
+    "Формули (stats.py, period 60 с): запитів за інтервал N = ΣSum(RequestCount); частка помилок "
+    "E = 100·ΣSum(ErrorCount)/ΣSum(RequestCount); середня затримка зважена: "
+    "L = Σ(Average(Latency)·SampleCount)/ΣSampleCount, бо в хвилинах різна кількість запитів. "
+    "Агрегат читається GetMetricStatistics, ряди за InstanceId — одним викликом GetMetricData.",
+    "Alarms (alarms.sh, ідемпотентно): bookings-high-errors — Sum(ErrorCount) > 10 за 60 с (у "
+    "нормі 0, при 120 запитах/хв поріг ≈ 8%); bookings-high-latency — Average(Latency) > 200 мс "
+    "(у нормі ≈ 8 мс). Обидва: evaluation-periods 1, treat-missing-data notBreaching, дії "
+    "ALARM/OK — SNS-топік bookings-alerts, на який підписана черга SQS bookings-alerts-queue.",
+]
+
+PHASES10 = [
+    ["Фаза", "Тривалість", "Навантаження", "Chaos"],
+    ["0 підготовка", "≈ 1 хв", "розігрів 10 с", "перестворення стека, alarms.sh"],
+    ["1 норма", "2 хв", "2 запити/с", "—"],
+    ["2 навантаження ×3", "2 хв", "6 запитів/с", "—"],
+    ["3 помилки app2", "3 хв", "2 запити/с", "fail_rate=0.5 лише на app2"],
+    ["4 затримка", "3 хв", "2 запити/с", "latency_ms=400 на всіх"],
+    ["5 відновлення", "5 хв", "2 запити/с", "вимкнено"],
+]
+
+PHASES10_TEXT = (
+    "Фази починаються на межах хвилин, тож кожна хвилинна точка належить одній фазі. Помилки — "
+    "лише на app2: агрегат ≈ 17% (≈ 20/хв) вище порогу, а ряди InstanceId показують винуватця. "
+    "Затримка — на всіх, бо Average по агрегату перевищить 200 мс, лише якщо повільні більшість "
+    "запитів. Фаза 5 — 5 хв, бо OK у LocalStack запізнюється. Журнал — reports/lab10-run.log."
+)
+
+SECTIONS10 = [
+    (
+        "Вимоги 1–3. Доступ до CloudWatch API, збір і публікація метрик",
+        [
+            (
+                "10-02",
+                "Публікація метрик у app/server.py",
+                "metric_data() формує для запиту RequestCount, ErrorCount (1 при статусі ≥ 500) і "
+                "Latency з одиницями Count/Milliseconds, кожну без вимірів і з InstanceId. "
+                "MetricsPublisher тримає чергу, відправляє put_metric_data пакетами до 20 точок і "
+                "лише журналює помилки.",
+                9.5,
+            ),
+            (
+                "10-01",
+                "Стек лаби 10 і перевірка CloudWatch API",
+                "app1–3, nginx і LocalStack healthy. cw-check.sh звертається до CloudWatch "
+                "(localhost:4567) і знаходить 12 рядів: 3 метрики × (агрегат + 3 екземпляри).",
+            ),
+            (
+                "10-03",
+                "aws cloudwatch list-metrics --namespace Bookings",
+                "Ті самі 12 рядів через AWS CLI: Dim = None — агрегат, InstanceId — по екземпляру.",
+            ),
+        ],
+    ),
+    (
+        "Вимоги 4, 5, 7. Кероване навантаження і отримання метрик",
+        [
+            (
+                "10-04",
+                "Підсумок loadgen фази 1 і stats.py",
+                "loadgen відправив 240 запитів за 120 с (2,00/с), по 80 на екземпляр, 0 помилок. "
+                "GetMetricStatistics повернув ті самі 240 (по 120 за хвилину), зважену середню "
+                "затримку 8,5 мс і максимум 46,5 мс; GetMetricData — 80/80/80 за InstanceId. "
+                "Клієнт бачить 15,3 мс, бо до обробки додаються nginx і мережа.",
+                9.5,
+            ),
+        ],
+    ),
+    (
+        "Вимога 6. Alarms на перевищення порогу",
+        [
+            (
+                "10-05",
+                "Фаза 0: alarms.sh і describe-alarms",
+                "Створено SNS-топік bookings-alerts, чергу SQS з підпискою і два alarm; обидва "
+                "одразу в стані OK (точки нижче порогу, відсутні дані — notBreaching).",
+                9.5,
+            ),
+        ],
+    ),
+    (
+        "Вимога 8. Штучні помилки і затримка, реакція alarm",
+        [
+            (
+                "10-06",
+                "Фаза 3: chaos fail_rate=0.5 на app2 і навантаження",
+                "POST /admin/chaos на порт 8102 (instance-2, минаючи nginx); за першу хвилину "
+                "клієнт отримав 22 відповіді 500 зі 120.",
+            ),
+            (
+                "10-07",
+                "bookings-high-errors: OK → ALARM",
+                "Перехід о 07:56:15, через 75 с після ввімкнення помилок. recentDatapoints 0, 5, 22: "
+                "оцінка о 07:55:15 бачила лише 5 помилок, наступна — 22 > 10.",
+            ),
+            (
+                "10-08",
+                "Фаза 4 (latency_ms=400 на всіх): bookings-high-latency: OK → ALARM",
+                "Перехід о 07:59:15, також +75 с; середнє у вікні 413,5 мс. high-errors при цьому "
+                "ще в ALARM, хоча помилки зникли о 07:58 — особливість оцінки в LocalStack.",
+            ),
+            (
+                "10-09",
+                "Фаза 5: повернення обох alarm в OK",
+                "high-errors уже в OK (перейшов о 08:01:15, див. історію нижче), high-latency → OK о "
+                "08:04:15; обидва — через 195 с після зняття chaos. Далі обидва OK.",
+                9.5,
+            ),
+            (
+                "10-10",
+                "Історія alarm і сповіщення SNS → SQS",
+                "Сирий describe-alarm-history (Timestamp у LocalStack показує час попереднього "
+                "переходу), розібрана історія з queryDate — 6 переходів, і ті самі 6 повідомлень у "
+                "черзі bookings-alerts-queue.",
+                10,
+            ),
+        ],
+    ),
+    (
+        "Вимоги 4–5. Статистика за весь прогін і по фазах",
+        [
+            (
+                "10-11",
+                "stats.py --phases --instances",
+                "15 хвилин з CloudWatch: 2280 запитів, 65 помилок (2,9%), зважена середня затримка "
+                "71,8 мс. Помилки — лише в instance-2; запити розподілені рівно (760/760/760).",
+                10,
+            ),
+        ],
+    ),
+    (
+        "Вимога 9. Графіки (дані лише з CloudWatch API)",
+        [
+            ("graphs/lab10-requests", "Запити за хвилину", "Фаза 2 — 360 запитів/хв, решта — 120.", 14),
+            (
+                "graphs/lab10-errors",
+                "Помилки: Sum(ErrorCount) з порогом alarm і частка помилок",
+                "У фазі 3 — 20–23 помилки/хв (16,7–19,2%), вище порогу 10. Червона смуга — стан "
+                "ALARM з історії alarm: він тримається до 08:01:15, ще 3 хв після зникнення помилок.",
+                14,
+            ),
+            (
+                "graphs/lab10-latency",
+                "Затримка: Average і Maximum з порогом 200 мс",
+                "У фазі 4 середня 413 мс; після зняття затримки середнє одразу падає до ≈ 8 мс, "
+                "а ALARM лишається до 08:04:15.",
+                14,
+            ),
+            (
+                "graphs/lab10-instances",
+                "Запити й помилки за InstanceId (GetMetricData)",
+                "Запити рівні на всіх екземплярах; помилки має лише instance-2 — вимір InstanceId "
+                "одразу локалізує несправний вузол.",
+                14,
+            ),
+        ],
+    ),
+    (
+        "Перевірка і репозиторій",
+        [
+            (
+                "10-12",
+                "make test: pytest і ruff",
+                "35 тестів зелені: 16 лаби 8, 5 адаптера лаби 9, 9 метрик і chaos, 5 формул "
+                "stats.py. Перевіряється публікація метрик з фейковим клієнтом CloudWatch "
+                "(namespace, імена, одиниці, виміри, виключення /health і /admin, пакети, помилка "
+                "CloudWatch). ruff без зауважень.",
+            ),
+            ("10-13", "GitHub: коміти лаби 10", ""),
+        ],
+    ),
+]
+
+CONCLUSION10 = [
+    "<b>Продуктивність.</b> У нормі застосунок обробляє запит у середньому за 8,5 мс (максимум у "
+    "хвилині до 46,5 мс); утричі більший потік (360 запитів/хв) не погіршив середнього (7,6 мс), "
+    "лише поодинокий пік 121 мс. Клієнт бачить ≈ 6 мс більше через nginx і мережу. Кількість "
+    "запитів і помилок у CloudWatch точно збіглася з підрахунком клієнта.",
+    "<b>Стабільність.</b> Збій одного екземпляра (50% помилок на app2) дав 18,1% помилок для "
+    "клієнтів, бо nginx не повторює відповіді 500 і round-robin віддає несправному вузлу третину "
+    "запитів. Без виміру InstanceId це виглядало б як загальна проблема; з ним видно, що всі 65 "
+    "помилок — від instance-2. Затримка 400 мс на всіх екземплярах повністю відобразилась у "
+    "метриці (413,9 мс), помилок не викликала.",
+    "<b>Реакція alarm.</b> Обидва alarm перейшли в ALARM через 75 с після початку проблеми і "
+    "повернулися в OK через 195 с після її усунення; усі 6 переходів дійшли через SNS у чергу SQS. "
+    "75 с = 15 с до найближчої оцінки (alarm оцінюється щохвилини від моменту створення) + одна "
+    "хвилина, поки проблема наповнить вікно.",
+    "<b>Обмеження LocalStack.</b> З коду планувальника LocalStack 4.9.2 видно, що він збирає 3 "
+    "ковзні вікна і тримає ALARM, якщо поріг перевищено в будь-якому з них, тому OK запізнюється "
+    "на ≈ 3 хв; справжній CloudWatch вирішує за останнім періодом. Timestamp в історії alarm "
+    "неточний (правильний час — queryDate), StateReason без чисел, metric math не підтримується, "
+    "а затримки інжесту метрик немає, тож в AWS реакція була б іншою. Абсолютні пороги й Average "
+    "— навчальний вибір; у продакшені краще alarm на частку помилок і перцентиль затримки.",
+]
+
+
 def p(text, style=BODY):
     return Paragraph(text, style)
 
 
 def frame_files(code):
-    return sorted(SCREENS.glob(f"{code}*.png"))
+    return sorted(HERE.glob(f"{code}*.png") if "/" in code else SCREENS.glob(f"{code}*.png"))
 
 
 def figure(n, path, title, seen, head=(), width=17 * cm, max_h=21 * cm):
@@ -462,11 +703,12 @@ def figure(n, path, title, seen, head=(), width=17 * cm, max_h=21 * cm):
 
 def figures(sections, width=17 * cm, max_h=21 * cm, head=()):
     missing = [f[0] for _, frames in sections for f in frames if not frame_files(f[0])]
-    if missing:
+    if missing and not os.environ.get("DRAFT"):  # DRAFT=1 — чернетка для перегляду без частини кадрів
         sys.exit(f"немає знімків у reports/screens/: {', '.join(missing)}")
     story, n = [], 0
     for heading, frames in sections:
-        head = [*head, p(heading, H2)]
+        before = BEFORE[frames[0][0]]() if frames[0][0] in BEFORE else []
+        head = [*head, *before, p(heading, H2)]
         for code, title, seen, *w in frames:
             files = frame_files(code)
             for k, path in enumerate(files, 1):
@@ -587,8 +829,87 @@ def lab9():
     write("lab9-loadbalancing.pdf", "Лабораторна робота №9", story, n)
 
 
+def lab10_table():
+    rows = json.loads((HERE / "lab10-stats.json").read_text())
+    head = ["Фаза", "Хв", "Запитів", "За хв", "5xx", "5xx, %", "Сер., мс", "Макс., мс"]
+    body = [
+        [r["title"], r["minutes"], f"{r['requests']:.0f}", f"{r['per_minute']:.0f}", f"{r['errors']:.0f}",
+         f"{r['error_pct']:.1f}", f"{r['lat_avg']:.1f}", f"{r['lat_max']:.1f}"]
+        for r in rows
+    ]  # fmt: skip
+    reactions = [
+        ["Alarm", "Chaos", "ALARM", "OK"],
+        ["bookings-high-errors", "07:55:00–07:58:00", "07:56:15 (+75 с)", "08:01:15 (+195 с)"],
+        ["bookings-high-latency", "07:58:00–08:01:00", "07:59:15 (+75 с)", "08:04:15 (+195 с)"],
+    ]
+    return KeepTogether(
+        [
+            p("Підсумок по фазах (з reports/lab10-stats.json, тобто з тих самих даних CloudWatch):"),
+            table(
+                [head, *[[str(c).replace(".", ",") for c in row] for row in body]],
+                [4.0, 1.0, 1.7, 1.5, 1.2, 1.6, 1.8, 1.9],
+            ),  # fmt: skip
+            Spacer(1, 6),
+            p(
+                "Реакція alarm (час переходу з describe-alarm-history, queryDate; ALARM — від початку "
+                "chaos, OK — від його зняття):"
+            ),  # fmt: skip
+            table(reactions, [4.4, 3.6, 3.6, 3.6]),
+            Spacer(1, 12),
+        ]
+    )
+
+
+EXTRA["10-11"] = lab10_table
+# фази описано перед першим кадром навантаження — там, де вони починаються
+BEFORE = {
+    "10-04": lambda: [
+        p("Фази експерименту", H2),
+        table(PHASES10, [3.8, 2.2, 3.0, 6.6]),
+        Spacer(1, 6),
+        p(PHASES10_TEXT),
+    ]
+}
+
+
+def lab10():
+    body, n = figures(SECTIONS10, width=11 * cm, max_h=19 * cm, head=[p("Хід виконання", H1)])
+    story = [
+        p(UNIVERSITY, CENTER),
+        p(INSTITUTE, CENTER),
+        Spacer(1, 4 * cm),
+        p("Лабораторна робота №10", TITLE),
+        p("з курсу «Технології DevOps»", CENTER),
+        Spacer(1, 1 * cm),
+        p(
+            "<b>Моніторинг та аналіз метрик хмарного застосунку за допомогою Amazon CloudWatch "
+            "у LocalStack</b>",
+            CENTER,
+        ),  # fmt: skip
+        p("Предметна область: система бронювання коворкінгу", CENTER),
+        Spacer(1, 4 * cm),
+        p(f"Виконав: студент групи {GROUP}", RIGHT),
+        p(STUDENT, RIGHT),
+        Spacer(1, 1 * cm),
+        p(f"Репозиторій: {REPO}", CENTER),
+        PageBreak(),
+        p("Мета", H1),
+        p(GOAL10),
+        p("Архітектура", H1),
+        Preformatted(ARCH10, CODE),
+        *[p(t) for t in ARCH10_TEXT],
+        p("Метрики, формули, alarms", H1),
+        table(METRICS10, [3.2, 2.8, 6.0, 3.6]),
+        Spacer(1, 6),
+        *[p(t) for t in METRICS10_TEXT],
+        *body,
+        KeepTogether([p("Висновки", H1), *[p(t) for t in CONCLUSION10]]),
+    ]
+    write("lab10-cloudwatch.pdf", "Лабораторна робота №10", story, n)
+
+
 def main():
-    labs = {"8": lab8, "9": lab9}
+    labs = {"8": lab8, "9": lab9, "10": lab10}
     for key in sys.argv[1:] or labs:
         labs[key]()
 
